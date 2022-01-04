@@ -248,23 +248,29 @@ export default class ExpressionEditorTextfield extends React.Component {
 
     this.clearSuggestions();
 
-    const { query, startRule } = this.props;
-    const { source } = this.state;
-
-    const errorMessage = diagnose(source, startRule, query);
-    this.setState({ errorMessage });
-
-    // whenever our input blurs we push the updated expression to our parent if valid
-    const expression = this.compileExpression();
-    if (expression) {
-      if (!isExpression(expression)) {
-        console.warn("isExpression=false", expression);
+    try {
+      // whenever our input blurs we push the updated expression to our parent if valid
+      const expression = this.compileExpression();
+      if (expression) {
+        if (!isExpression(expression)) {
+          console.warn("isExpression=false", expression);
+        }
+        this.props.onChange(expression);
+      } else {
+        const diagnostic = this.diagnoseExpression();
+        /// An unsupported expression is one that errors on the resolver but compiles here
+        const error = diagnostic
+          ? diagnostic
+          : { message: "Unsupported expression" };
+        this.setState({ errorMessage: error.message });
+        this.props.onError(error);
       }
-      this.props.onChange(expression);
-    } else if (errorMessage) {
-      this.props.onError(errorMessage);
-    } else {
-      this.props.onError({ message: t`Invalid expression` });
+    } catch (err) {
+      // This shouldn't(?) happen, but for now, just in case.
+      console.warn("resolver error", err);
+      const diagnostic = this.diagnoseExpression();
+      this.setState({ errorMessage: diagnostic.message });
+      this.props.onError(diagnostic);
     }
   };
 
@@ -285,6 +291,15 @@ export default class ExpressionEditorTextfield extends React.Component {
     const { expression } = processSource({ source, query, startRule });
 
     return expression;
+  }
+
+  diagnoseExpression() {
+    const { source } = this.state;
+    if (!source || source.length === 0) {
+      return { message: "Empty expression" };
+    }
+    const { query, startRule } = this.props;
+    return diagnose(source, startRule, query);
   }
 
   commitExpression() {
