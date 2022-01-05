@@ -73,7 +73,20 @@ export function interceptPromise(method, path) {
 
 const chainStart = Symbol();
 
-export const cypressWaitAll = function(...commands) {
+/**
+ * Waits for all Cypress commands similarly to Promise.all.
+ * Helps to avoid excessive nesting and verbosity
+ *
+ * @param {Array.<Cypress.Chainable<any>>} commands - Cypress commands
+ * @example
+ * cypressWaitAll([
+ *   cy.createQuestionAndAddToDashboard(firstQuery, 1),
+ *   cy.createQuestionAndAddToDashboard(secondQuery, 1),
+ * ]).then(() => {
+ *   cy.visit(`/dashboard/1`);
+ * });
+ */
+export const cypressWaitAll = function(commands) {
   const _ = Cypress._;
   const chain = cy.wrap(null, { log: false });
 
