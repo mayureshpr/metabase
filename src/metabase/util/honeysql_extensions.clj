@@ -1,17 +1,19 @@
 (ns metabase.util.honeysql-extensions
   (:refer-clojure :exclude [+ - / * mod inc dec cast concat format])
-  (:require [clojure.pprint :as pprint]
-            [clojure.string :as str]
-            [honeysql.core :as hsql]
-            [honeysql.format :as hformat]
-            honeysql.types
-            [metabase.util :as u]
-            [metabase.util.schema :as su]
-            [potemkin.types :as p.types]
-            [pretty.core :as pretty :refer [PrettyPrintable]]
-            [schema.core :as s])
-  (:import honeysql.format.ToSql
-           java.util.Locale))
+  (:require
+   [clojure.pprint :as pprint]
+   [clojure.string :as str]
+   [honeysql.core :as hsql]
+   [honeysql.format :as hformat]
+   [honeysql.types]
+   [metabase.util :as u]
+   [metabase.util.schema :as su]
+   [potemkin.types :as p.types]
+   [pretty.core :as pretty]
+   [schema.core :as s])
+  (:import
+   (honeysql.format ToSql)
+   (java.util Locale)))
 
 (comment honeysql.types/keep-me)
 
@@ -82,9 +84,9 @@
        \.
        (for [component components]
          (hformat/quote-identifier component, :split false)))))
-  PrettyPrintable
+  pretty/PrettyPrintable
   (pretty [_]
-    (cons 'hx/identifier (cons identifier-type components))))
+    (cons `hx/identifier (cons identifier-type components))))
 
 ;; don't use `->Identifier` or `map->Identifier`. Use the `identifier` function instead, which cleans up its input
 (alter-meta! #'->Identifier    assoc :private true)
@@ -116,9 +118,9 @@
     (as-> literal <>
       (str/replace <> #"(?<![\\'])'(?![\\'])"  "''")
       (str \' <> \')))
-  PrettyPrintable
+  pretty/PrettyPrintable
   (pretty [_]
-    (list 'literal literal)))
+    (list `literal literal)))
 
 ;; as with `Identifier` you should use the the `literal` function below instead of the auto-generated factory functions.
 (alter-meta! #'->Literal    assoc :private true)
@@ -157,9 +159,9 @@
 
 ;; a wrapped for any HoneySQL form that records additional type information in an `info` map.
 (p.types/defrecord+ TypedHoneySQLForm [form info]
-  PrettyPrintable
+  pretty/PrettyPrintable
   (pretty [_]
-    `(with-type-info ~form ~info))
+    (list `with-type-info form info))
 
   ToSql
   (to-sql [_]
@@ -287,19 +289,17 @@
 (def ^{:arglists '([& exprs])} concat  "SQL `concat` function."  (partial hsql/call :concat))
 
 ;; Etc (Dev Stuff)
-(alter-meta! #'honeysql.core/format assoc :style/indent :defn)
-(alter-meta! #'honeysql.core/call   assoc :style/indent :defn)
 
-(extend-protocol PrettyPrintable
+(extend-protocol pretty/PrettyPrintable
   honeysql.types.SqlCall
   (pretty [{fn-name :name, args :args, :as this}]
-    (with-meta (apply list 'hsql/call fn-name args)
+    (with-meta (apply list `hsql/call fn-name args)
       (meta this))))
 
 (defmethod print-method honeysql.types.SqlCall
   [call writer]
   (print-method (pretty/pretty call) writer))
 
-(defmethod clojure.pprint/simple-dispatch honeysql.types.SqlCall
+(defmethod pprint/simple-dispatch honeysql.types.SqlCall
   [call]
-  (clojure.pprint/write-out (pretty/pretty call)))
+  (pprint/write-out (pretty/pretty call)))

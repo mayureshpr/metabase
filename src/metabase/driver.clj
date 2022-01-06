@@ -446,7 +446,11 @@
 
 (defmethod database-supports? :default [driver feature _] (supports? driver feature))
 
-(defmulti ^:deprecated format-custom-field-name
+;; TODO -- not sure this should really be deprecated since we actually still use it in
+;; [[metabase.query-processor.middleware.pre-alias-aggregations/ag-name]]...
+;; [[metabase.driver.sql.query-processor/escape-alias]] would be an appropriate replacement, but it's currently specific
+;; to SQL drivers
+(defmulti format-custom-field-name
   "Prior to Metabase 0.33.0, you could specifiy custom names for aggregations in MBQL by wrapping the clause in a
   `:named` clause:
 
@@ -464,7 +468,7 @@
   the query at all; thus in MBQL 1.3.0 [`:named` was replaced by the more general
   `:aggregation-options`](https://github.com/metabase/mbql/pull/7). Because user-generated names are no longer used as
   aliases in native queries themselves, this method is no longer needed and will be removed in a future release."
-  {:arglists '([driver custom-field-name])}
+  {:arglists '([driver custom-field-name]), :deprecated "0.33.0"}
   dispatch-on-initialized-driver
   :hierarchy #'hierarchy)
 

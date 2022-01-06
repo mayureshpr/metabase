@@ -6,11 +6,10 @@
             [metabase.models.field :refer [Field]]
             [metabase.models.table :as table]
             [metabase.query-processor.error-type :as error-type]
-            [metabase.query-processor.interface :as qp.i]
             [metabase.query-processor.store :as qp.store]
             [metabase.types :as types]
             [metabase.util :as u]
-            [metabase.util.i18n :refer [trs tru]]
+            [metabase.util.i18n :refer [tru]]
             [metabase.util.schema :as su]
             [schema.core :as s]
             [toucan.db :as db]))
@@ -19,7 +18,7 @@
 ;;; |                                              Add Implicit Fields                                               |
 ;;; +----------------------------------------------------------------------------------------------------------------+
 
-(defn- table->sorted-fields
+(defn- table->sorted-fields*
   [table-id]
   (db/select [Field :id :base_type :effective_type :coercion_strategy :semantic_type]
     :table_id        table-id
@@ -28,9 +27,15 @@
     :parent_id       nil
     {:order-by table/field-order-rule}))
 
+(defn- table->sorted-fields
+  "Return a sequence of all Fields for table that we'd normally include in the equivalent of a `SELECT *`."
+  [table-id]
+  ;; cache duplicate calls to this function in the same QP run.
+  (qp.store/cached-fn [::table-sorted-fields (u/the-id table-id)] #(table->sorted-fields* table-id)))
+
 (s/defn sorted-implicit-fields-for-table :- mbql.s/Fields
   "For use when adding implicit Field IDs to a query. Return a sequence of field clauses, sorted by the rules listed
-  in `metabase.query-processor.sort`, for all the Fields in a given Table."
+  in [[metabase.query-processor.sort]], for all the Fields in a given Table."
   [table-id :- su/IntGreaterThanZero]
   (let [fields (table->sorted-fields table-id)]
     (when (empty? fields)
@@ -74,10 +79,9 @@
     aggregations :aggregation} :- mbql.s/MBQLQuery]
   ;; if someone is trying to include an explicit `source-query` but isn't specifiying `source-metadata` warn that
   ;; there's nothing we can do to help them
-  (when (and source-query (empty? source-metadata))
-    (when-not qp.i/*disable-qp-logging*
-      (log/warn
-       (trs "Warning: cannot determine fields for an explicit `source-query` unless you also include `source-metadata`."))))
+  (when (and source-query
+             (empty? source-metadata))
+    (log/debug "Warning: cannot determine fields for an explicit `source-query` unless you also include `source-metadata`."))
   ;; Determine whether we can add the implicit `:fields`
   (and (or source-table
            (and source-query (seq source-metadata)))

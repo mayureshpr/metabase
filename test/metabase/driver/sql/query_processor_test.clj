@@ -10,10 +10,10 @@
             [metabase.query-processor :as qp]
             [metabase.query-processor.interface :as qp.i]
             [metabase.test :as mt]
-            [metabase.util :as u]
             [metabase.util.honeysql-extensions :as hx]
             [pretty.core :refer [PrettyPrintable]]
-            [schema.core :as s])
+            [schema.core :as s]
+            [clojure.walk :as walk])
   (:import metabase.util.honeysql_extensions.Identifier))
 
 (deftest process-mbql-query-keys-test
@@ -91,7 +91,7 @@
                   :fields       [$id $name $category_id $latitude $longitude $price]
                   :limit        100
                   :joins        [{:source-table $$categories
-                                  :alias        "c",
+                                  :alias        "c"
                                   :strategy     :left-join
                                   :condition    [:=
                                                  $category_id
@@ -133,7 +133,7 @@
                             [:like
                              (hx/with-database-type-info (bound-alias "v" (id :field "v" "NAME")) "varchar")
                              "F%"]
-                            [:> (bound-alias "source" (id :field "source" "user_id")) 0]],
+                            [:> (bound-alias "source" (id :field "source" "user_id")) 0]]
                 :order-by  [[(hx/with-database-type-info (bound-alias "v" (id :field "v" "NAME")) "varchar")
                              :asc]]}
                (#'sql.qp/mbql->honeysql
@@ -420,7 +420,7 @@
                                 :condition    [:= $product_id &PRODUCTS__via__PRODUCT_ID.products.id]}
                                {:source-table $$people
                                 :strategy     :left-join
-                                :alias        "PEOPLE__via__USER_ID",
+                                :alias        "PEOPLE__via__USER_ID"
                                 :fk-field-id  %user_id
                                 :condition    [:= $user_id &PEOPLE__via__USER_ID.people.id]}]})))))))
 
@@ -466,13 +466,13 @@
                              &CategoriesStats.*MaxPrice/Integer
                              &CategoriesStats.*AvgPrice/Integer
                              &CategoriesStats.*MinPrice/Integer]
-               :expressions {:RelativePrice [:/ $price &CategoriesStats.*AvgPrice/Integer]},
+               :expressions {:RelativePrice [:/ $price &CategoriesStats.*AvgPrice/Integer]}
                :joins       [{:strategy     :left-join
                               :condition    [:= $category_id &CategoriesStats.venues.category_id]
                               :source-query {:source-table $$venues
                                              :aggregation  [[:aggregation-options [:max $price] {:name "MaxPrice"}]
                                                             [:aggregation-options [:avg $price] {:name "AvgPrice"}]
-                                                            [:aggregation-options [:min $price] {:name "MinPrice"}]],
+                                                            [:aggregation-options [:min $price] {:name "MinPrice"}]]
                                              :breakout     [$category_id]}
                               :alias        "CategoriesStats"
                               :fields       :all}]
@@ -503,111 +503,305 @@
       (str/replace #"PUBLIC\." "")
       str/trim))
 
-(defn- mega-query []
-  (mt/mbql-query nil
-    {:fields       [&P1.products.category
-                    &People.people.source
-                    [:field "count" {:base-type :type/BigInteger}]
-                    &Q2.products.category
-                    [:field "avg" {:base-type :type/Integer, :join-alias "Q2"}]]
-     :source-query {:source-table $$orders
-                    :aggregation  [[:aggregation-options [:count] {:name "count"}]]
-                    :breakout     [&P1.products.category
-                                   &People.people.source]
-                    :order-by     [[:asc &P1.products.category]
-                                   [:asc &People.people.source]]
-                    :joins        [{:strategy     :left-join
-                                    :source-table $$products
-                                    :condition
-                                    [:= $orders.product_id &P1.products.id]
-                                    :alias        "P1"}
-                                   {:strategy     :left-join
-                                    :source-table $$people
-                                    :condition    [:= $orders.user_id &People.people.id]
-                                    :alias        "People"}]}
-     :joins        [{:strategy     :left-join
-                     :condition    [:= $products.category &Q2.products.category]
-                     :alias        "Q2"
-                     :source-query {:source-table $$reviews
-                                    :aggregation  [[:aggregation-options [:avg $reviews.rating] {:name "avg"}]]
-                                    :breakout     [&P2.products.category]
-                                    :joins        [{:strategy     :left-join
-                                                    :source-table $$products
-                                                    :condition    [:= $reviews.product_id &P2.products.id]
-                                                    :alias        "P2"}]}}]
-     :limit        2}))
+(defn- symbols [s]
+  (binding [*read-eval* false]
+    (read-string (str \( s \)))))
 
-(deftest source-aliases-test
-  (mt/dataset sample-dataset
-    (mt/with-everything-store
-      (let [query       (mega-query)
-            small-query (get-in query [:query :source-query])]
-        (testing (format "Query =\n%s" (u/pprint-to-str small-query))
-          (is (= {:this-level-fields {[:field (mt/id :products :category) nil] "P1__CATEGORY"
-                                      [:field (mt/id :people :source) nil]     "People__SOURCE"}
-                  :source-fields     {}}
-                 (#'sql.qp/source-aliases :h2 small-query))))
+(defn- sql-map
+  "Convert a sequence of SQL symbols into something sorta like a HoneySQL map. The main purpose of this is to make tests
+  somewhat possible to debug. The goal isn't to actually be HoneySQL, but rather to make diffing huge maps easy."
+  [symbols]
+  (if-not (sequential? symbols)
+    symbols
+    (loop [m {}, current-key nil, [x & [y :as more]] symbols]
+      (cond
+        ;; two-word "keywords"
+        ('#{[LEFT JOIN] [GROUP BY]} [x y])
+        (let [x-y (keyword (str/lower-case (format "%s-%s" (name x) (name y))))]
+          (recur m x-y (rest more)))
 
-        (testing (format "Query =\n%s" (u/pprint-to-str query))
-          (is (= {[:field (mt/id :products :category) nil]                "P1__CATEGORY"
-                  [:field (mt/id :people :source) nil]                    "People__SOURCE"
-                  [:field (mt/id :products :category) {:join-alias "Q2"}] "P2__CATEGORY"}
-                 (:source-fields (#'sql.qp/source-aliases :h2 (:query query))))))))))
+        ;; one-word keywords
+        ('#{SELECT FROM LIMIT} x)
+        (let [x (keyword (str/lower-case x))]
+          (recur m x more))
 
-(defn mini-query []
-  (mt/dataset sample-dataset
-    (qp/query->preprocessed
-     (mt/mbql-query orders
-       {:source-table $$orders
-        :fields       [$id &Q2.products.category]
-        :joins        [{:fields       :none
-                        :condition    [:= $products.category &Q2.products.category]
+        (and (sequential? x)
+             (some? current-key)
+             (empty? (get m current-key)))
+        (recur m current-key (cons (sql-map x) more))
+
+        :else
+        (let [m (update m current-key #(conj (vec %) x))]
+          (if more
+            (recur m current-key more)
+            m))))))
+
+(defn- sql->sql-map [sql]
+  (-> sql even-prettier-sql symbols sql-map))
+
+(defn- preprocessed-mbql->sql-map [mbql driver]
+  (driver/with-driver driver
+    (->> mbql
+         (sql.qp/mbql->honeysql driver)
+         (sql.qp/format-honeysql driver)
+         first
+         sql->sql-map)))
+
+(deftest qp-refs-test
+  (testing "A fully-preprocessed MBQL query with the correct `:qp/refs` should generate the correct SQL (smaller query)"
+    (mt/dataset sample-dataset
+      (mt/with-everything-store
+        (is (= '{:select [source.P1__CATEGORY AS P1__CATEGORY]
+                 :from   [{:select    [P1.CATEGORY AS P1__CATEGORY]
+                           :from      [ORDERS]
+                           :left-join [PRODUCTS P1 ON ORDERS.PRODUCT_ID = P1.ID]}
+                          source]}
+               (-> (mt/mbql-query orders
+                     {:fields       [&P1.products.category]
+                      :source-query {:source-table $$orders
+                                     :fields       [&P1.products.category]
+                                     :joins        [{:strategy     :left-join
+                                                     :source-table $$products
+                                                     :condition    [:= $product_id &P1.products.id]
+                                                     :alias        "P1"
+                                                     :qp/refs      {$products.category {:source nil
+                                                                                        :alias  "CATEGORY"}
+                                                                    $products.id       {:source nil
+                                                                                        :alias  "ID"}}}]
+                                     :qp/refs      {&P1.products.category {:source {:table "P1"
+                                                                                    :alias "CATEGORY"}
+                                                                           :alias  "P1__CATEGORY"}
+                                                    &P1.products.id       {:source {:table "P1"
+                                                                                    :alias "ID"}
+                                                                           :alias  "P1__ID"}}}
+                      :qp/refs      {&P1.products.category {:source {:table "source"
+                                                                     :alias "P1__CATEGORY"}
+                                                            :alias  "P1__CATEGORY"}}})
+                   (preprocessed-mbql->sql-map :h2))))))))
+
+(deftest qp-refs-fields-test
+  (testing "Just make sure the `:fields` clause actually respects whatever is in `:qp/refs`"
+    (mt/dataset sample-dataset
+      (mt/with-everything-store
+        (is (= '{:select [source.P1__CATEGORY AS P1__CATEGORY]
+                 :from   [ORDERS]}
+               (-> (mt/mbql-query orders
+                     {:fields  [$products.category]
+                      :qp/refs {$products.category {:position 0, :alias "P1__CATEGORY", :source {:table "source", :alias "P1__CATEGORY"}}}})
+                   (preprocessed-mbql->sql-map :h2))))))))
+
+(deftest qp-refs-join-in-source-query-test
+  (testing "Make sure a JOIN inside a source query gets compiled as expected"
+    (mt/dataset sample-dataset
+      (mt/with-everything-store
+        (is (= '{:select [source.P1__CATEGORY AS P1__CATEGORY]
+                 :from   [{:select    [P1.CATEGORY AS P1__CATEGORY]
+                           :from      [ORDERS]
+                           :left-join [PRODUCTS P1 ON ORDERS.PRODUCT_ID = P1.ID]}
+                          source]}
+               (-> (mt/mbql-query orders
+                     {:fields       [&P1.products.category]
+                      :source-query {:source-table $$orders
+                                     :fields       [&P1.products.category]
+                                     :joins        [{:strategy     :left-join
+                                                     :source-table $$products
+                                                     :condition    [:= $product_id &P1.products.id]
+                                                     :alias        "P1"}]
+                                     :qp/refs      {$product_id           {:alias "PRODUCT_ID"}
+                                                    &P1.products.category {:position 0, :alias "P1__CATEGORY", :source {:table "P1", :alias "CATEGORY"}}
+                                                    &P1.products.id       {:source {:table "P1", :alias "ID"}, :alias "P1__ID"}}}
+                      :qp/refs      {&P1.products.category {:position 0, :alias "P1__CATEGORY", :source {:table "source", :alias "P1__CATEGORY"}}}})
+                   (preprocessed-mbql->sql-map :h2))))))))
+
+(deftest qp-refs-join-against-source-query-test
+  (testing "Make sure a JOIN referencing fields from the source query use correct aliases/etc"
+    (mt/dataset sample-dataset
+      (mt/with-everything-store
+        (is (= '{:select    [source.P1__CATEGORY AS P1__CATEGORY]
+                 :from      [{:select    [P1.CATEGORY AS P1__CATEGORY]
+                              :from      [ORDERS]
+                              :left-join [PRODUCTS P1 ON ORDERS.PRODUCT_ID = P1.ID]}
+                             source]
+                 :left-join [{:select    [P2.CATEGORY AS P2__CATEGORY]
+                              :from      [REVIEWS]
+                              :left-join [PRODUCTS P2 ON REVIEWS.PRODUCT_ID = P2.ID]}
+                             Q2
+                             ON source.P1__CATEGORY = Q2.P2__CATEGORY]}
+               (-> (mt/mbql-query orders
+                     {:fields       [&P1.products.category]
+                      :source-query {:source-table $$orders
+                                     :fields       [&P1.products.category]
+                                     :joins        [{:strategy     :left-join
+                                                     :source-table $$products
+                                                     :condition    [:= $product_id &P1.products.id]
+                                                     :alias        "P1"}]
+                                     :qp/refs      {$product_id           {:alias "PRODUCT_ID"}
+                                                    &P1.products.category {:position 0, :alias "P1__CATEGORY", :source {:table "P1", :alias "CATEGORY"}}
+                                                    &P1.products.id       {:source {:table "P1", :alias "ID"}, :alias "P1__ID"}}}
+                      :joins        [{:strategy     :left-join
+                                      :condition    [:= &P1.products.category &Q2.products.category]
+                                      :alias        "Q2"
+                                      :source-query {:source-table $$reviews
+                                                     :fields       [&P2.products.category]
+                                                     :joins        [{:strategy     :left-join
+                                                                     :source-table $$products
+                                                                     :condition    [:= $reviews.product_id &P2.products.id]
+                                                                     :alias        "P2"}]
+                                                     :qp/refs      {&P2.products.id       {:source {:table "P2", :alias "ID"}, :alias "P2__ID"}
+                                                                    &P2.products.category {:position 0, :alias "P2__CATEGORY", :source {:table "P2", :alias "CATEGORY"}}
+                                                                    $reviews.product_id   {:alias "PRODUCT_ID"}}}}]
+                      :qp/refs      {&P1.products.category {:position 0, :alias "P1__CATEGORY", :source {:table "source", :alias "P1__CATEGORY"}}
+                                     &Q2.products.category {:alias "Q2__P2__CATEGORY", :source {:table "Q2", :alias "P2__CATEGORY"}}}})
+                   (preprocessed-mbql->sql-map :h2))))))))
+
+(def ^:private expected-mega-query-sql-map
+  '{:select    [source.P1__CATEGORY AS P1__CATEGORY
+                source.People__SOURCE AS People__SOURCE
+                source.count AS count
+                Q2.P2__CATEGORY AS Q2__P2__CATEGORY
+                Q2.avg AS Q2__avg]
+    :from      [{:select    [P1.CATEGORY AS P1__CATEGORY
+                             People.SOURCE AS People__SOURCE
+                             count (*) AS count]
+                 :from      [ORDERS]
+                 :left-join [PRODUCTS P1 ON ORDERS.PRODUCT_ID = P1.ID
+                             PEOPLE People ON ORDERS.USER_ID = People.ID]
+                 :group-by  [P1.CATEGORY People.SOURCE ORDER BY P1.CATEGORY ASC People.SOURCE ASC]}
+                source]
+    :left-join [{:select    [P2.CATEGORY AS P2__CATEGORY avg (REVIEWS.RATING) AS avg]
+                 :from      [REVIEWS]
+                 :left-join [PRODUCTS P2
+                             ON REVIEWS.PRODUCT_ID = P2.ID]
+                 :group-by  [P2.CATEGORY]}
+                Q2 ON source.P1__CATEGORY = Q2.P2__CATEGORY]
+    :limit     [2]})
+
+(deftest mega-query-qp-refs-test
+  (testing "A fully-preprocessed MBQL query with the correct `:qp/refs` should generate the correct SQL (mega query)"
+    (mt/dataset sample-dataset
+      (mt/with-everything-store
+        (is (= expected-mega-query-sql-map
+               (-> (mt/mbql-query orders
+                     {:fields
+                      [&P1.products.category
+                       &People.people.source
+                       *count/BigInteger
+                       &Q2.products.category
+                       &Q2.*avg/Integer]
+
+                      :source-query
+                      {:source-table $$orders
+                       :aggregation  [[:aggregation-options [:count] {:name "count"}]]
+                       :breakout     [&P1.products.category &People.people.source]
+                       :order-by     [[:asc &P1.products.category] [:asc &People.people.source]]
+                       :joins        [{:strategy     :left-join
+                                       :source-table $$products
+                                       :condition    [:= $product_id &P1.products.id]
+                                       :alias        "P1"}
+                                      {:strategy     :left-join
+                                       :source-table $$people
+                                       :condition    [:= $user_id &People.people.id]
+                                       :alias        "People"}]
+                       :qp/refs      {!default.&P1.products.created_at   {:source {:table "P1", :alias "CREATED_AT"}, :alias "P1__CREATED_AT"}
+                                      !default.&People.people.birth_date {:source {:table "People", :alias "BIRTH_DATE"}, :alias "People__BIRTH_DATE"}
+                                      !default.&People.people.created_at {:source {:table "People", :alias "CREATED_AT"}, :alias "People__CREATED_AT"}
+                                      !default.created_at                {:alias "CREATED_AT"}
+                                      $discount                          {:alias "DISCOUNT"}
+                                      $id                                {:alias "ID"}
+                                      $product_id                        {:alias "PRODUCT_ID"}
+                                      $quantity                          {:alias "QUANTITY"}
+                                      $subtotal                          {:alias "SUBTOTAL"}
+                                      $tax                               {:alias "TAX"}
+                                      $total                             {:alias "TOTAL"}
+                                      $user_id                           {:alias "USER_ID"}
+                                      &P1.products.category              {:position 0, :alias "P1__CATEGORY", :source {:table "P1", :alias "CATEGORY"}}
+                                      &P1.products.ean                   {:source {:table "P1", :alias "EAN"}, :alias "P1__EAN"}
+                                      &P1.products.id                    {:source {:table "P1", :alias "ID"}, :alias "P1__ID"}
+                                      &P1.products.price                 {:source {:table "P1", :alias "PRICE"}, :alias "P1__PRICE"}
+                                      &P1.products.rating                {:source {:table "P1", :alias "RATING"}, :alias "P1__RATING"}
+                                      &P1.products.title                 {:source {:table "P1", :alias "TITLE"}, :alias "P1__TITLE"}
+                                      &P1.products.vendor                {:source {:table "P1", :alias "VENDOR"}, :alias "P1__VENDOR"}
+                                      &People.people.address             {:source {:table "People", :alias "ADDRESS"}, :alias "People__ADDRESS"}
+                                      &People.people.city                {:source {:table "People", :alias "CITY"}, :alias "People__CITY"}
+                                      &People.people.email               {:source {:table "People", :alias "EMAIL"}, :alias "People__EMAIL"}
+                                      &People.people.id                  {:source {:table "People", :alias "ID"}, :alias "People__ID"}
+                                      &People.people.latitude            {:source {:table "People", :alias "LATITUDE"}, :alias "People__LATITUDE"}
+                                      &People.people.longitude           {:source {:table "People", :alias "LONGITUDE"}, :alias "People__LONGITUDE"}
+                                      &People.people.name                {:source {:table "People", :alias "NAME"}, :alias "People__NAME"}
+                                      &People.people.password            {:source {:table "People", :alias "PASSWORD"}, :alias "People__PASSWORD"}
+                                      &People.people.source              {:position 1, :alias "People__SOURCE", :source {:table "People", :alias "SOURCE"}}
+                                      &People.people.state               {:source {:table "People", :alias "STATE"}, :alias "People__STATE"}
+                                      &People.people.zip                 {:source {:table "People", :alias "ZIP"}, :alias "People__ZIP"}
+                                      :aggregation                       0}}
+
+                      :joins
+                      [{:strategy     :left-join
+                        :condition    [:= #_$products.category &P1.products.category &Q2.products.category]
                         :alias        "Q2"
                         :source-query {:source-table $$reviews
-                                       :joins        [{:fields       :all
+                                       :aggregation  [[:aggregation-options [:avg $reviews.rating] {:name "avg"}]]
+                                       :breakout     [&P2.products.category]
+                                       :joins        [{:strategy     :left-join
                                                        :source-table $$products
-                                                       :condition    [:=
-                                                                      $reviews.product_id
-                                                                      &Products.products.id]
-                                                       :alias        "Products"}]
-                                       :aggregation  [[:avg $reviews.rating]]
-                                       :breakout     [&Products.products.category]}}]
-        :limit        2}))))
+                                                       :condition    [:= $reviews.product_id &P2.products.id]
+                                                       :alias        "P2"}]
+                                       :qp/refs      {&P2.products.vendor              {:source {:table "P2", :alias "VENDOR"}, :alias "P2__VENDOR"}
+                                                      &P2.products.id                  {:source {:table "P2", :alias "ID"}, :alias "P2__ID"}
+                                                      &P2.products.ean                 {:source {:table "P2", :alias "EAN"}, :alias "P2__EAN"}
+                                                      &P2.products.category            {:position 0, :alias "P2__CATEGORY", :source {:table "P2", :alias "CATEGORY"}}
+                                                      $reviews.rating                  {:alias "RATING"}
+                                                      $reviews.body                    {:alias "BODY"}
+                                                      $reviews.product_id              {:alias "PRODUCT_ID"}
+                                                      $reviews.id                      {:alias "ID"}
+                                                      !default.reviews.created_at      {:alias "CREATED_AT"}
+                                                      &P2.products.price               {:source {:table "P2", :alias "PRICE"}, :alias "P2__PRICE"}
+                                                      $reviews.reviewer                {:alias "REVIEWER"}
+                                                      !default.&P2.products.created_at {:source {:table "P2", :alias "CREATED_AT"}, :alias "P2__CREATED_AT"}
+                                                      &P2.products.title               {:source {:table "P2", :alias "TITLE"}, :alias "P2__TITLE"}
+                                                      &P2.products.rating              {:source {:table "P2", :alias "RATING"}, :alias "P2__RATING"}}}}]
+                      :limit   2
+                      :qp/refs {&P1.products.category {:position 0, :alias "P1__CATEGORY", :source {:table "source", :alias "P1__CATEGORY"}}
+                                &People.people.source {:position 1, :alias "People__SOURCE", :source {:table "source", :alias "People__SOURCE"}}
+                                *count/BigInteger     {:position 2, :alias "count"}
+                                &Q2.products.category {:position 3, :alias "Q2__P2__CATEGORY", :source {:table "Q2", :alias "P2__CATEGORY"}}
+                                &Q2.*avg/Integer      {:position 4, :alias "Q2__avg", :source {:table "Q2", :alias "avg"}}}})
+                   (preprocessed-mbql->sql-map :h2))))))))
 
-(deftest use-correct-source-aliases-test
-  (testing "Should generate correct SQL for joins against source queries that contain joins (#12928)")
-  (mt/dataset sample-dataset
-    (is (= (->> ["SELECT source.P1__CATEGORY AS P1__CATEGORY,"
-                 "       source.People__SOURCE AS People__SOURCE,"
-                 "       source.count AS count,"
-                 "       Q2.P2__CATEGORY AS Q2__CATEGORY,"
-                 "       Q2.avg AS avg"
-                 "FROM ("
-                 "    SELECT P1.CATEGORY AS P1__CATEGORY,"
-                 "           People.SOURCE AS People__SOURCE,"
-                 "           count(*) AS count"
-                 "    FROM ORDERS"
-                 "    LEFT JOIN PRODUCTS P1"
-                 "           ON ORDERS.PRODUCT_ID = P1.ID"
-                 "    LEFT JOIN PEOPLE People"
-                 "           ON ORDERS.USER_ID = People.ID"
-                 "    GROUP BY P1.CATEGORY,"
-                 "             People.SOURCE"
-                 "    ORDER BY P1.CATEGORY ASC,"
-                 "             People.SOURCE ASC"
-                 ") source"
-                 "LEFT JOIN ("
-                 "    SELECT P2.CATEGORY AS P2__CATEGORY,"
-                 "           avg(REVIEWS.RATING) AS avg"
-                 "    FROM REVIEWS"
-                 "    LEFT JOIN PRODUCTS P2"
-                 "           ON REVIEWS.PRODUCT_ID = P2.ID"
-                 "    GROUP BY P2.CATEGORY"
-                 ") Q2"
-                 "       ON source.P1__CATEGORY = Q2.P2__CATEGORY"
-                 "LIMIT 2"]
-                (str/join " ")
-                even-prettier-sql)
-           (-> (mega-query)
-               mbql->native
-               even-prettier-sql)))))
+;; same as above, but tests everything e2e
+(deftest mega-query-qp-refs-e2e-test
+  (testing "Should generate correct SQL for joins against source queries that contain joins (#12928)"
+    (mt/dataset sample-dataset
+      (is (= expected-mega-query-sql-map
+             (-> (mt/mbql-query nil
+                   {:fields       [&P1.products.category
+                                   &People.people.source
+                                   [:field "count" {:base-type :type/BigInteger}]
+                                   &Q2.products.category
+                                   [:field "avg" {:base-type :type/Integer, :join-alias "Q2"}]]
+                    :source-query {:source-table $$orders
+                                   :aggregation  [[:aggregation-options [:count] {:name "count"}]]
+                                   :breakout     [&P1.products.category
+                                                  &People.people.source]
+                                   :order-by     [[:asc &P1.products.category]
+                                                  [:asc &People.people.source]]
+                                   :joins        [{:strategy     :left-join
+                                                   :source-table $$products
+                                                   :condition    [:= $orders.product_id &P1.products.id]
+                                                   :alias        "P1"}
+                                                  {:strategy     :left-join
+                                                   :source-table $$people
+                                                   :condition    [:= $orders.user_id &People.people.id]
+                                                   :alias        "People"}]}
+                    :joins        [{:strategy     :left-join
+                                    :condition    [:= $products.category &Q2.products.category]
+                                    :alias        "Q2"
+                                    :source-query {:source-table $$reviews
+                                                   :aggregation  [[:aggregation-options [:avg $reviews.rating] {:name "avg"}]]
+                                                   :breakout     [&P2.products.category]
+                                                   :joins        [{:strategy     :left-join
+                                                                   :source-table $$products
+                                                                   :condition    [:= $reviews.product_id &P2.products.id]
+                                                                   :alias        "P2"}]}}]
+                    :limit        2})
+                 mbql->native
+                 sql->sql-map))))))
