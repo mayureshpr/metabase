@@ -28,7 +28,7 @@
            [metabase.util.honeysql_extensions Identifier TypedHoneySQLForm]))
 
 ;; TODO - yet another `*query*` dynamic var. We should really consolidate them all so we only need a single one.
-(def ^:dynamic ^:private *query*
+(def ^:dynamic *query*
   "The INNER query currently being processed, for situations where we need to refer back to it."
   nil)
 
@@ -405,22 +405,33 @@
         (println (format "USING CLOSEST MATCH => %s" (u/colorize 'cyan (pr-str closest-match))))
         closest-match)))
 
+(defn- remove-namespaced-options [options]
+  (into {}
+        (remove (fn [[k _]]
+                  (when (keyword? k)
+                    (namespace k))))
+        options))
+
 (defn- field-ref-info [field-clause]
-  (or (get-in *query* [:qp/refs field-clause])
-      ;; HACK HACK HACK HACK Ideally we shouldn't have to do any of this 'closest match' nonsense. We need to add
-      ;; middleware to fix bad references automatically instead of doing this HERE.
-      (let [closest-match (mbql.u/match-one field-clause
-                            [:field id-or-name _]
-                            (some (fn [[a-clause info]]
-                                    (mbql.u/match-one a-clause
-                                      [:field an-id-or-name _]
-                                      (when (= an-id-or-name id-or-name)
-                                        info)))
-                                  (:qp/refs *query*)))]
-        (log/warnf (str/join \newline [(trs "Missing Field ref info for {0}" (u/colorize 'red (pr-str field-clause)))
-                                       (trs "Field refs: {0}" (u/pprint-to-str (:qp/refs *query*)))
-                                       (trs "Using closest match {0}" (u/colorize 'cyan (pr-str closest-match)))]))
-        closest-match)))
+  (let [field-clause (cond-> field-clause
+                       (mbql.u/is-clause? :field field-clause)
+                       (mbql.u/update-field-options remove-namespaced-options))]
+    (or (get-in *query* [:qp/refs field-clause])
+        ;; HACK HACK HACK HACK Ideally we shouldn't have to do any of this 'closest match' nonsense. We need to add
+        ;; middleware to fix bad references automatically instead of doing this HERE.
+        (let [[closest-match info] (mbql.u/match-one field-clause
+                                     [:field id-or-name _]
+                                     (some (fn [[a-clause info]]
+                                             (mbql.u/match-one a-clause
+                                               [:field an-id-or-name _]
+                                               (when (= an-id-or-name id-or-name)
+                                                 [a-clause info])))
+                                           (:qp/refs *query*)))]
+          (log/warnf (str/join \newline [(trs "Missing Field ref info for {0}" (u/colorize 'red (pr-str field-clause)))
+                                         (trs "Field refs:")
+                                         (u/pprint-to-str (:qp/refs *query*))
+                                         (trs "Using closest match {0} {1}" (u/colorize 'cyan (pr-str closest-match)) (u/colorize 'yellow info))]))
+          info))))
 
 (defmethod ->honeysql [:sql :field]
   [driver [_ field-id-or-name options :as field-clause]]
@@ -1002,6 +1013,10 @@
        inner-query)
       (apply-top-level-clauses driver honeysql-form inner-query))))
 
+;; TODO -- this should be generalized and moved somewhere else since a few of our drivers need to increase query nesting
+;; by a level for one reason or another. Maybe a QP or MBQL util namespace?
+;;
+;; TODO -- this doesn't properly handle stuff like `:aggregation` references (!)
 (defn- expressions->subselect
   [driver query]
   (let [subselect (-> query
@@ -1013,15 +1028,19 @@
                                            [:field id-or-name (dissoc opts :temporal-unit :binning)]
                                            :expression
                                            &match)
-                                         distinct)))]
-    (-> (mbql.u/replace query
-          [:expression expression-name]
-          [:field (escape-alias driver expression-name) {:base-type (:base_type (annotate/infer-expression-type &match))}]
-          ;; the outer select should not cast as the cast happens in the inner select
-          [:field (field-id :guard int?) field-info]
-          [:field field-id (assoc field-info ::outer-select true)])
-        (dissoc :source-table :joins :expressions :source-metadata)
-        (assoc :source-query subselect))))
+                                         distinct)))
+        ;; TODO -- this looks like it replaces any expression with this name regardless of level??
+        query' (-> (mbql.u/replace query
+                     [:expression expression-name]
+                     [:field (escape-alias driver expression-name) {:base-type (:base_type (annotate/infer-expression-type &match))}]
+                     ;; the outer select should not cast as the cast happens in the inner select
+                     [:field (field-id :guard int?) field-info]
+                     [:field field-id (assoc field-info ::outer-select true)])
+                   (dissoc :source-table :joins :expressions :source-metadata)
+                   (assoc :source-query subselect))]
+    (if (= query query')
+      query
+      (add-references/add-references query'))))
 
 (defn- preprocess-query
   [driver {:keys [expressions] :as query}]
@@ -1042,6 +1061,9 @@
 (defn mbql->native
   "Transpile MBQL query into a native SQL statement."
   [driver {database :database, :as outer-query}]
+  ;; NOCOMMIT
+  (println "QUERY =>")
+  (println (u/pprint-to-str 'yellow (add-references/add-references outer-query)))
   (let [honeysql-form (mbql->honeysql driver (add-references/add-references outer-query))
         [sql & args]  (format-honeysql driver honeysql-form)]
     {:query sql, :params args}))

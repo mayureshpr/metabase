@@ -389,7 +389,7 @@
 (def ^:private Field*
   (one-of expression field))
 
-;; TODO -- consider renaming this FieldOrExpression,
+;; TODO -- consider renaming this FieldOrExpression
 (def Field
   "Schema for either a `:field` clause (reference to a Field) or an `:expression` clause (reference to an expression)."
   (s/recursive #'Field*))

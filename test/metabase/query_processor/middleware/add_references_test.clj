@@ -79,13 +79,68 @@
                                                                          :alias        "P2"}]}}]}))
                             [:query :qp/refs])))))))
 
-;; TODO -- test for an aggregation
-;; TODO -- test for expression
-
 (defn- add-references [{database-id :database, :as query}]
   (mt/with-everything-store
     (driver/with-driver (db/select-one-field :engine Database :id database-id)
       (add-references/add-references query))))
+
+(deftest expressions-test
+  (is (= (mt/mbql-query venues
+           {:expressions {"double_id" [:* $id 2]}
+            :qp/refs     {$category_id {:alias "CATEGORY_ID"}
+                          $id          {:alias "ID"}
+                          $latitude    {:alias "LATITUDE"}
+                          $longitude   {:alias "LONGITUDE"}
+                          $name        {:alias "NAME"}
+                          $price       {:alias "PRICE"}}})
+         (add-references
+          (mt/mbql-query venues
+            {:expressions {"double_id" [:* $id 2]}}))))
+
+  (testing ":expression in :fields"
+    (is (= (mt/mbql-query venues
+             {:expressions {"double_id" [:* $id 2]}
+              :fields      [[:expression "double_id"]]
+              :qp/refs     {$category_id              {:alias "CATEGORY_ID"}
+                            $id                       {:alias "ID"}
+                            $latitude                 {:alias "LATITUDE"}
+                            $longitude                {:alias "LONGITUDE"}
+                            $name                     {:alias "NAME"}
+                            $price                    {:alias "PRICE"}
+                            [:expression "double_id"] {:position 0, :alias "double_id"}}})
+           (add-references
+            (mt/mbql-query venues
+              {:fields      [[:expression "double_id"]]
+               :expressions {"double_id" [:* $id 2]}})))))
+
+  (testing "Inside a nested query"
+    (is (= (mt/mbql-query venues
+             {:source-query {:source-table $$venues
+                             :expressions  {:double_id [:* $id 2]}
+                             :fields       [$id $name $category_id $latitude $longitude $price [:expression "double_id"]]
+                             :qp/refs      {$category_id              {:position 2, :alias "CATEGORY_ID"}
+                                            $id                       {:position 0, :alias "ID"}
+                                            $latitude                 {:position 3, :alias "LATITUDE"}
+                                            $longitude                {:position 4, :alias "LONGITUDE"}
+                                            $name                     {:position 1, :alias "NAME"}
+                                            $price                    {:position 5, :alias "PRICE"}
+                                            [:expression "double_id"] {:position 6, :alias "double_id"}}}
+              :fields       [$id $name $category_id $latitude $longitude $price *double_id/Float]
+              :qp/refs      {$id                                           {:position 0, :alias "ID", :source {:table "source", :alias "ID"}},
+                             $name                                         {:position 1, :alias "NAME", :source {:table "source", :alias "NAME"}},
+                             $category_id                                  {:position 2, :alias "CATEGORY_ID", :source {:table "source", :alias "CATEGORY_ID"}},
+                             $latitude                                     {:position 3, :alias "LATITUDE", :source {:table "source", :alias "LATITUDE"}},
+                             $longitude                                    {:position 4, :alias "LONGITUDE", :source {:table "source", :alias "LONGITUDE"}},
+                             $price                                        {:position 5, :alias "PRICE", :source {:table "source", :alias "PRICE"}},
+                             [:field "double_id" {:base-type :type/Float}] {:position 6, :alias "double_id", :source {:table "source", :alias "double_id"}}}})
+           (add-references
+            (mt/mbql-query venues
+              {:source-query {:source-table $$venues
+                              :expressions  {:double_id [:* $id 2]}
+                              :fields       [$id $name $category_id $latitude $longitude $price [:expression "double_id"]]}
+               :fields       [$id $name $category_id $latitude $longitude $price *double_id/Float]}))))))
+
+;; TODO -- native query with source metadata test.
 
 (deftest mega-query-refs-test
   (testing "Should generate correct SQL for joins against source queries that contain joins (#12928)"

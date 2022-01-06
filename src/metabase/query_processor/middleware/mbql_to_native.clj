@@ -4,7 +4,8 @@
   (:require [clojure.tools.logging :as log]
             [metabase.driver :as driver]
             [metabase.query-processor.context :as context]
-            [metabase.util :as u]))
+            [metabase.util :as u]
+            [metabase.util.i18n :refer [tru]]))
 
 (defn- query->native-form
   "Return a `:native` query form for `query`, converting it from MBQL if needed."
@@ -29,4 +30,10 @@
        (assoc query :native native-query)
        (fn [metadata]
          (rff (assoc metadata :native_form native-query)))
-       context))))
+       ;; wrap a thrown Exception with a info about the MBQL query
+       (update context :raisef (fn [raisef]
+                                 (fn [e context]
+                                   (raisef (ex-info (tru "Error executing query: {0}" (ex-message e))
+                                                    {:query query}
+                                                    e)
+                                           context))))))))

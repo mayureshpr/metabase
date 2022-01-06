@@ -4,7 +4,10 @@
             [metabase.query-processor.middleware.add-implicit-clauses :as add-implicit-clauses]
             [metabase.query-processor.store :as qp.store]
             [metabase.util :as u]
-            [metabase.query-processor.middleware.annotate :as annotate]))
+            [metabase.query-processor.middleware.annotate :as annotate]
+            [schema.core :as s]
+            [metabase.mbql.schema :as mbql.s]
+            [metabase.util.schema :as su]))
 
 (defn- source-table-references [source-table-id join-alias]
   (when source-table-id
@@ -28,14 +31,14 @@
    {}
    (map (fn [[clause info]]
           (mbql.u/match-one clause
-            [:field id-or-name _opts]
-            (let [field      (when (integer? id-or-name)
-                               (qp.store/field id-or-name))
-                  field-name (if (string? id-or-name)
-                               id-or-name
-                               (:name field))
-                  table      (some-> (:table_id field) qp.store/table)]
+            [:field (id :guard integer?) _opts]
+            (let [field      (qp.store/field id)
+                  field-name (:name field)
+                  #_table      #_(some-> (:table_id field) qp.store/table)]
               [clause (assoc info :alias field-name)])
+
+            [:field (field-name :guard string?) _opts]
+            [clause (assoc info :alias field-name)]
 
             _
             [clause info])))
@@ -51,6 +54,9 @@
               [:aggregation-options _ opts]
               [[:aggregation (::index opts)] {:position i, :alias (:name opts)}]
 
+              [:expression expression-name]
+              [[:expression expression-name] {:position i, :alias expression-name}]
+
               _
               [clause {:position i}]))))
    [breakout
@@ -64,7 +70,7 @@
 
 ;; TODO FIXME need to make sure we handle native source queries -- determine refs from `:source-metadata` (especially for native queries!)
 (defn- source-query-references
-  [{refs :qp/refs, aggregations :aggregation, :as source-query} _source-metadata]
+  [{refs :qp/refs, aggregations :aggregation, :keys [expressions], :as source-query} _source-metadata]
   (into
    {}
    (comp (filter (fn [[_clause info]]
@@ -77,7 +83,15 @@
                                [:aggregation index]
                                (let [ag-clause              (get aggregations index)
                                      {base-type :base_type} (annotate/col-info-for-aggregation-clause source-query ag-clause)]
-                                 [:field (:alias info) {:base-type base-type}]))
+                                 [:field (:alias info) {:base-type (or base-type :type/*)}])
+
+                               [:expression expression-name]
+                               (let [expression-definition (get expressions (keyword expression-name))
+                                     {base-type :base_type} (some-> expression-definition annotate/infer-expression-type)]
+                                 [:field expression-name {:base-type (or base-type :type/*)}])
+
+                               _
+                               clause)
                       info (-> info
                                (assoc :source {:table "source", :alias (:alias info)})
                                (dissoc :position))]
@@ -114,10 +128,18 @@
     (apply merge-with recursive-merge maps)
     (last maps)))
 
-(defn- add-references*
+(def ^:private QPRefs
+  ;; TODO -- ensure unique `:position` ?
+  {mbql.s/FieldOrAggregationReference {:alias                     su/NonBlankString
+                                       (s/optional-key :position) s/Int
+                                       (s/optional-key :source)   {:table su/NonBlankString
+                                                                   :alias su/NonBlankString}}})
+
+(s/defn ^:private add-references* :- {s/Keyword s/Any
+                                      :qp/refs QPRefs}
   [{:keys [source-table source-query source-metadata joins]
     join-alias :alias
-    refs :qp/refs
+    #_refs #_:qp/refs
     :as inner-query}]
   (let [refs (-> (recursive-merge
                   (add-alias-info (source-table-references source-table join-alias))
