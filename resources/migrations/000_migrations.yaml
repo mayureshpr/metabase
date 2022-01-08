@@ -9042,10 +9042,10 @@ databaseChangeLog:
         Added 0.42.0 - modify type of metabase_database.points_of_interest from
         text to ${text.type} on mysql,mariadb
       changes:
-        - modifyDataType:
-            tableName: metabase_database
-            columnName: points_of_interest
-            newDataType: ${text.type}
+        # - modifyDataType:
+        #     tableName: metabase_database
+        #     columnName: points_of_interest
+        #     newDataType: ${text.type}
       preConditions:
         - onFail: MARK_RAN
         - dbms:
