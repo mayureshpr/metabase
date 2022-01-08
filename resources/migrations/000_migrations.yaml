@@ -2750,12 +2750,12 @@ databaseChangeLog:
       author: camsaul
       changes:
         ######################################## Add "points_of_interest" metadata column to various models ########################################
-        - addColumn:
-            tableName: metabase_database
-            columns:
-              - column:
-                  name: points_of_interest
-                  type: text
+        # - addColumn:
+        #     tableName: metabase_database
+        #     columns:
+        #       - column:
+        #           name: points_of_interest
+        #           type: text
         - addColumn:
             tableName: metabase_table
             columns:
