@@ -2748,6 +2748,11 @@ databaseChangeLog:
   - changeSet:
       id: 38
       author: camsaul
+      preConditions:
+        - onFail: MARK_RAN
+        # If we're dumping the migration as a SQL file or trying to force-migrate we can't check the preconditions
+        # so just go ahead and skip the entire thing. This is a non-critical migration
+        - onUpdateSQL: IGNORE
       changes:
         ######################################## Add "points_of_interest" metadata column to various models ########################################
         - addColumn:
