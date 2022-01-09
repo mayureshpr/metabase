@@ -2755,42 +2755,42 @@ databaseChangeLog:
         - onUpdateSQL: IGNORE
       changes:
         ######################################## Add "points_of_interest" metadata column to various models ########################################
-        - addColumn:
-            tableName: metabase_database
-            columns:
-              - column:
-                  name: points_of_interest
-                  type: text
-        - addColumn:
-            tableName: metabase_table
-            columns:
-              - column:
-                  name: points_of_interest
-                  type: text
-        - addColumn:
-            tableName: metabase_field
-            columns:
-              - column:
-                  name: points_of_interest
-                  type: text
-        - addColumn:
-            tableName: report_dashboard
-            columns:
-              - column:
-                  name: points_of_interest
-                  type: text
-        - addColumn:
-            tableName: metric
-            columns:
-              - column:
-                  name: points_of_interest
-                  type: text
-        - addColumn:
-            tableName: segment
-            columns:
-              - column:
-                  name: points_of_interest
-                  type: text
+        # - addColumn:
+        #     tableName: metabase_database
+        #     columns:
+        #       - column:
+        #           name: points_of_interest
+        #           type: text
+        # - addColumn:
+        #     tableName: metabase_table
+        #     columns:
+        #       - column:
+        #           name: points_of_interest
+        #           type: text
+        # - addColumn:
+        #     tableName: metabase_field
+        #     columns:
+        #       - column:
+        #           name: points_of_interest
+        #           type: text
+        # - addColumn:
+        #     tableName: report_dashboard
+        #     columns:
+        #       - column:
+        #           name: points_of_interest
+        #           type: text
+        # - addColumn:
+        #     tableName: metric
+        #     columns:
+        #       - column:
+        #           name: points_of_interest
+        #           type: text
+        # - addColumn:
+        #     tableName: segment
+        #     columns:
+        #       - column:
+        #           name: points_of_interest
+        #           type: text
         ######################################## Add "caveats" metadata column to various models ########################################
         - addColumn:
             tableName: metabase_database
@@ -9040,21 +9040,21 @@ databaseChangeLog:
         - dbms:
             type: mysql,mariadb
 
-  - changeSet:
-      id: v42.00-018
-      author: jeff303
-      comment: >-
-        Added 0.42.0 - modify type of metabase_database.points_of_interest from
-        text to ${text.type} on mysql,mariadb
-      changes:
-        # - modifyDataType:
-        #     tableName: metabase_database
-        #     columnName: points_of_interest
-        #     newDataType: ${text.type}
-      preConditions:
-        - onFail: MARK_RAN
-        - dbms:
-            type: mysql,mariadb
+  # - changeSet:
+  #     id: v42.00-018
+  #     author: jeff303
+  #     comment: >-
+  #       Added 0.42.0 - modify type of metabase_database.points_of_interest from
+  #       text to ${text.type} on mysql,mariadb
+  #     changes:
+  #       # - modifyDataType:
+  #       #     tableName: metabase_database
+  #       #     columnName: points_of_interest
+  #       #     newDataType: ${text.type}
+  #     preConditions:
+  #       - onFail: MARK_RAN
+  #       - dbms:
+  #           type: mysql,mariadb
 
   - changeSet:
       id: v42.00-019
@@ -9136,21 +9136,21 @@ databaseChangeLog:
         - dbms:
             type: mysql,mariadb
 
-  - changeSet:
-      id: v42.00-024
-      author: jeff303
-      comment: >-
-        Added 0.42.0 - modify type of metabase_field.points_of_interest from
-        text to ${text.type} on mysql,mariadb
-      changes:
-        - modifyDataType:
-            tableName: metabase_field
-            columnName: points_of_interest
-            newDataType: ${text.type}
-      preConditions:
-        - onFail: MARK_RAN
-        - dbms:
-            type: mysql,mariadb
+  # - changeSet:
+  #     id: v42.00-024
+  #     author: jeff303
+  #     comment: >-
+  #       Added 0.42.0 - modify type of metabase_field.points_of_interest from
+  #       text to ${text.type} on mysql,mariadb
+  #     changes:
+  #       - modifyDataType:
+  #           tableName: metabase_field
+  #           columnName: points_of_interest
+  #           newDataType: ${text.type}
+  #     preConditions:
+  #       - onFail: MARK_RAN
+  #       - dbms:
+  #           type: mysql,mariadb
 
   - changeSet:
       id: v42.00-025
@@ -9232,21 +9232,21 @@ databaseChangeLog:
         - dbms:
             type: mysql,mariadb
 
-  - changeSet:
-      id: v42.00-030
-      author: jeff303
-      comment: >-
-        Added 0.42.0 - modify type of metabase_table.points_of_interest from
-        text to ${text.type} on mysql,mariadb
-      changes:
-        - modifyDataType:
-            tableName: metabase_table
-            columnName: points_of_interest
-            newDataType: ${text.type}
-      preConditions:
-        - onFail: MARK_RAN
-        - dbms:
-            type: mysql,mariadb
+  # - changeSet:
+  #     id: v42.00-030
+  #     author: jeff303
+  #     comment: >-
+  #       Added 0.42.0 - modify type of metabase_table.points_of_interest from
+  #       text to ${text.type} on mysql,mariadb
+  #     changes:
+  #       - modifyDataType:
+  #           tableName: metabase_table
+  #           columnName: points_of_interest
+  #           newDataType: ${text.type}
+  #     preConditions:
+  #       - onFail: MARK_RAN
+  #       - dbms:
+  #           type: mysql,mariadb
 
   - changeSet:
       id: v42.00-031
@@ -9312,21 +9312,21 @@ databaseChangeLog:
         - dbms:
             type: mysql,mariadb
 
-  - changeSet:
-      id: v42.00-035
-      author: jeff303
-      comment: >-
-        Added 0.42.0 - modify type of metric.points_of_interest from text to
-        ${text.type} on mysql,mariadb
-      changes:
-        - modifyDataType:
-            tableName: metric
-            columnName: points_of_interest
-            newDataType: ${text.type}
-      preConditions:
-        - onFail: MARK_RAN
-        - dbms:
-            type: mysql,mariadb
+  # - changeSet:
+  #     id: v42.00-035
+  #     author: jeff303
+  #     comment: >-
+  #       Added 0.42.0 - modify type of metric.points_of_interest from text to
+  #       ${text.type} on mysql,mariadb
+  #     changes:
+  #       - modifyDataType:
+  #           tableName: metric
+  #           columnName: points_of_interest
+  #           newDataType: ${text.type}
+  #     preConditions:
+  #       - onFail: MARK_RAN
+  #       - dbms:
+  #           type: mysql,mariadb
 
   - changeSet:
       id: v42.00-036
@@ -9584,21 +9584,21 @@ databaseChangeLog:
         - dbms:
             type: mysql,mariadb
 
-  - changeSet:
-      id: v42.00-052
-      author: jeff303
-      comment: >-
-        Added 0.42.0 - modify type of report_dashboard.points_of_interest from
-        text to ${text.type} on mysql,mariadb
-      changes:
-        - modifyDataType:
-            tableName: report_dashboard
-            columnName: points_of_interest
-            newDataType: ${text.type}
-      preConditions:
-        - onFail: MARK_RAN
-        - dbms:
-            type: mysql,mariadb
+  # - changeSet:
+  #     id: v42.00-052
+  #     author: jeff303
+  #     comment: >-
+  #       Added 0.42.0 - modify type of report_dashboard.points_of_interest from
+  #       text to ${text.type} on mysql,mariadb
+  #     changes:
+  #       - modifyDataType:
+  #           tableName: report_dashboard
+  #           columnName: points_of_interest
+  #           newDataType: ${text.type}
+  #     preConditions:
+  #       - onFail: MARK_RAN
+  #       - dbms:
+  #           type: mysql,mariadb
 
   - changeSet:
       id: v42.00-053
@@ -9707,21 +9707,21 @@ databaseChangeLog:
         - dbms:
             type: mysql,mariadb
 
-  - changeSet:
-      id: v42.00-060
-      author: jeff303
-      comment: >-
-        Added 0.42.0 - modify type of segment.points_of_interest from text to
-        ${text.type} on mysql,mariadb
-      changes:
-        - modifyDataType:
-            tableName: segment
-            columnName: points_of_interest
-            newDataType: ${text.type}
-      preConditions:
-        - onFail: MARK_RAN
-        - dbms:
-            type: mysql,mariadb
+  # - changeSet:
+  #     id: v42.00-060
+  #     author: jeff303
+  #     comment: >-
+  #       Added 0.42.0 - modify type of segment.points_of_interest from text to
+  #       ${text.type} on mysql,mariadb
+  #     changes:
+  #       - modifyDataType:
+  #           tableName: segment
+  #           columnName: points_of_interest
+  #           newDataType: ${text.type}
+  #     preConditions:
+  #       - onFail: MARK_RAN
+  #       - dbms:
+  #           type: mysql,mariadb
 
   - changeSet:
       id: v42.00-061
